@@ -11,7 +11,7 @@ import random
 BOT_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
 CHAT_ID = "8564427714"
 CHECK_INTERVAL = 60       # Проверять каждую минуту
-PROCESSOR = 3.5           # Оповещать при изменении больше 3.5%
+PROCESSOR = 1.1       # Оповещать при изменении больше 3.5%
 # ===================================
 
 bot = Bot(token=BOT_TOKEN)

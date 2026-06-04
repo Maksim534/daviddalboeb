@@ -24,7 +24,7 @@ BOT_USERNAME = 'bfgproject'            # Юзернейм бота BFG
 YOUR_CHAT_ID = 6888643375           # Твой Telegram ID (узнать у @userinfobot)
 
 # Настройки торговли
-CHECK_INTERVAL = 60 * 3             # Проверять каждые 3 минуты
+CHECK_INTERVAL = 60             # Проверять каждые 3 минуты
 DROP_PERCENT = 0.3                  # Покупаем при падении на 0.5%
 RISE_PERCENT = 0.3                  # Продаём при росте на 0.5%
 MIN_PRICE = 58000                   # Ниже этой цены не покупаем

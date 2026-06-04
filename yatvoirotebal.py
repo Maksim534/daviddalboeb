@@ -4,7 +4,7 @@
 import aiohttp
 import asyncio
 from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import json
 from datetime import datetime
 
@@ -13,7 +13,7 @@ from datetime import datetime
 BOT_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
 
 # Brawl Stars API токен (получить на https://developer.brawlstars.com)
-BS_API_TOKEN = "https://api.brawlify.com/v1/brawlers"
+BS_API_TOKEN = "https://developer.brawlstars.com"
 
 # ID твоего Telegram чата (куда слать логи)
 LOG_CHAT_ID = "8564427714"
@@ -52,15 +52,10 @@ async def get_player_info(tag):
     encoded_tag = clean_tag(tag)
     return await fetch_bs_api(f"players/{encoded_tag}")
 
-# Получение battle log (для анализа последних игр)
-async def get_battle_log(tag):
-    encoded_tag = clean_tag(tag)
-    return await fetch_bs_api(f"players/{encoded_tag}/battlelog", {"limit": 5})
-
 # Оценка качества аккаунта
 def evaluate_account(player_data):
     if "error" in player_data:
-        return "❌ Аккаунт не найден", "💀"
+        return None
     
     trophies = player_data.get("trophies", 0)
     highest_trophies = player_data.get("highestTrophies", 0)
@@ -70,8 +65,6 @@ def evaluate_account(player_data):
     brawlers = player_data.get("brawlers", [])
     total_brawlers = len(brawlers)
     
-    # Всего бойцов в игре ~76 (на сейчас, но можно вытащить динамически)
-    # Но для оценки просто считаем количество
     legendaries = len([b for b in brawlers if b.get("rarity") == "LEGENDARY"])
     mythics = len([b for b in brawlers if b.get("rarity") == "MYTHIC"])
     epics = len([b for b in brawlers if b.get("rarity") == "EPIC"])
@@ -88,10 +81,7 @@ def evaluate_account(player_data):
     
     # Оценка
     score = 0
-    verdict = ""
-    emoji = ""
     
-    # Критерии оценки
     if trophies >= 30000:
         score += 30
     elif trophies >= 20000:
@@ -199,36 +189,41 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Анализируем
     account_info = evaluate_account(player_data)
-    report = format_report(account_info)
+    if not account_info:
+        await update.message.reply_text(f"❌ Ошибка при анализе аккаунта `{player_tag}`.")
+        return
     
+    report = format_report(account_info)
     await update.message.reply_text(report, parse_mode='Markdown')
 
 # Если пользователь просто пишет тег в чат (без команды)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
     
-    # Проверяем, похоже на тег Brawl Stars (буквы + цифры, обычно 8-12 символов)
+    # Проверяем, похоже на тег Brawl Stars
     if (len(text) >= 5 and len(text) <= 15 and 
         any(c.isdigit() for c in text) and 
         any(c.isalpha() for c in text)):
         # Подставляем в команду /check
+        context.args = [text]
         await check(update, context)
     else:
         await update.message.reply_text(
-            "Отправь тег игрока в формате `2PPQVUQ8J` или `#2PPQVUQ8J`"
+            "Отправь тег игрока в формате `2PPQVUQ8J` или `#2PPQVUQ8J`\n"
+            "Пример: `2PPQVUQ8J`"
         )
 
 def main():
     print("=" * 50)
     print("🔥 Brawl Stars Tracker Bot запущен!")
-    print(f"🤖 Бот: @{BOT_TOKEN[:10]}...")
+    print(f"🤖 Бот: {BOT_TOKEN[:10]}...")
     print("=" * 50)
     
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("check", check))
-    app.add_handler(MessageHandler(None, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     app.run_polling()
 

@@ -254,7 +254,7 @@ async def main_loop():
                 
                 if current_price <= buy_threshold and state['last_action'] != 'buy':
                     print("🔻 ПОКУПАЮ...")
-                    if await send_bfg_command(client, "Купить биткоин всё"):
+                    if await send_bfg_command(client, "биткоин купить все"):
                         await send_report(client, f"📉 КУПЛЕНО по ${current_price:.2f}")
                         state['last_action'] = 'buy'
                         state['last_price'] = current_price
@@ -262,7 +262,7 @@ async def main_loop():
                         
                 elif current_price >= sell_threshold and state['last_action'] != 'sell':
                     print("🟢 ПРОДАЮ...")
-                    if await send_bfg_command(client, "Продать биткоин всё"):
+                    if await send_bfg_command(client, "биткоин продать все"):
                         await send_report(client, f"📈 ПРОДАНО по ${current_price:.2f}")
                         state['last_action'] = 'sell'
                         state['last_price'] = current_price

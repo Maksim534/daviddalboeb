@@ -127,7 +127,7 @@ async def buy_max_btc(client, balance, price):
 async def sell_all_btc(client):
     """Продаёт всё количество BTC"""
     # ПРАВИЛЬНАЯ КОМАНДА ДЛЯ ПРОДАЖИ
-    command = "биткоины продать"
+    command = "продать биткоины"
     await client.send_message(BOT_USERNAME, command)
     print(f"📤 {command}")
     await asyncio.sleep(2)

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-# ChatGPT Telegram Bot - Продвинутая версия (с памятью)
+# ChatGPT Telegram Bot - РАБОЧАЯ ВЕРСИЯ (OpenAI >=1.0.0)
 
-import openai
+from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ========== НАСТРОЙКИ ==========
+# ========== ТВОИ НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
 OPENAI_API_KEY = "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"
-# ================================
+# ====================================
 
-openai.api_key = OPENAI_API_KEY
+# Создаём клиента (новый синтаксис)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Храним историю диалогов для каждого пользователя
 user_histories = {}
@@ -50,7 +51,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_histories[user_id] = history
     
     try:
-        response = openai.ChatCompletion.create(
+        # НОВЫЙ СПОСОБ ВЫЗОВА (через клиент)
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "Ты дружелюбный и полезный помощник. Отвечай кратко и по делу."},

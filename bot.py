@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# BFG Miner + Trader v3.0 - Ебашь трейд и шахту в одном флаконе, сука!
+# BFG Miner + Trader v4.0 - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# - Починен трейд (обработка None)
+# - Шахта проверяет энергию после каждой копки
+# - Правильный перехват сообщений от BFG
 
 import asyncio
 import time
@@ -9,7 +12,7 @@ import os
 import re
 import random
 from datetime import datetime
-from telethon import TelegramClient, errors
+from telethon import TelegramClient, errors, events
 
 # ========== НАСТРОЙКИ (ЗАМЕНИ НА СВОИ) ==========
 # Telegram API (получить на my.telegram.org)
@@ -22,15 +25,14 @@ YOUR_CHAT_ID = 6888643375           # Твой Telegram ID (узнать у @use
 
 # Настройки торговли
 CHECK_INTERVAL = 60 * 3             # Проверять каждые 3 минуты
-DROP_PERCENT = 0.5                  # Покупаем при падении на 2.5%
-RISE_PERCENT = 0.5                  # Продаём при росте на 2.5%
+DROP_PERCENT = 0.5                  # Покупаем при падении на 0.5%
+RISE_PERCENT = 0.5                  # Продаём при росте на 0.5%
 MIN_PRICE = 58000                   # Ниже этой цены не покупаем
 MAX_PRICE = 85000                   # Выше этой цены не продаём
 
 # Настройки шахты
 MINE_INTERVAL_MIN = 10 * 60         # Минимум 10 минут между заходами в шахту
 MINE_INTERVAL_MAX = 20 * 60         # Максимум 20 минут
-MINE_DELAY_BETWEEN_ACTIONS = 2.0    # Пауза между командами в шахте (сек)
 
 # Файлы для сохранения состояния
 STATE_FILE = "bfg_state.json"
@@ -52,6 +54,9 @@ LEVEL_ORES = {
     "Эктоплазма": "эктоплазма",
     "Палладий": "палладий",
 }
+
+# Глобальная переменная для перехвата ответов от BFG
+last_mine_response = ""
 
 # ========== ФУНКЦИИ ТРЕЙДА ==========
 def get_btc_price():
@@ -122,17 +127,18 @@ def save_mine_state(state):
         json.dump(state, f, indent=2)
 
 async def mine_process(client):
-    """Полный цикл шахты: профиль → копка → продажа"""
+    """Полный цикл шахты: профиль → копка до 0 энергии → продажа"""
+    global last_mine_response
     print("\n⛏️ ЗАХОДИМ В ШАХТУ, ЕБАТЬ!")
     
-    # Отправляем запрос профиля
+    # Сбрасываем переменную
+    last_mine_response = ""
+    
+    # 1. Получаем профиль
     await client.send_message(BOT_USERNAME, "Моя шахта")
     await asyncio.sleep(3)
     
-    # Здесь нужен перехват ответа через @client.on(events.NewMessage)
-    # Это заглушка — в реальном коде ты получишь profile_text из события
-    profile_text = await get_last_message_from_bfg(client)  # см. ниже
-    
+    profile_text = last_mine_response
     if not profile_text:
         print("❌ Не удалось получить профиль шахты")
         return
@@ -147,40 +153,60 @@ async def mine_process(client):
     ore_command = get_ore_to_mine(level)
     print(f"⛏ Копаем: {ore_command}")
     
-    # Копаем, пока есть энергия
-    for i in range(energy):
-        await client.send_message(BOT_USERNAME, ore_command)
-        print(f"  Скопал {i+1}/{energy}")
-        await asyncio.sleep(random.uniform(1.5, 3.0))
+    # 2. Копаем, пока есть энергия
+    max_attempts = energy + 5  # запас на случай, если энергия не обновилась
+    last_energy = energy
     
-    # Продаём
+    for i in range(max_attempts):
+        # Отправляем команду на копку
+        await client.send_message(BOT_USERNAME, ore_command)
+        print(f"  Отправлена команда {i+1}")
+        await asyncio.sleep(random.uniform(2.0, 3.0))
+        
+        # Проверяем остаток энергии
+        last_mine_response = ""
+        await client.send_message(BOT_USERNAME, "Моя шахта")
+        await asyncio.sleep(2)
+        
+        new_profile = last_mine_response
+        if new_profile:
+            new_energy, new_level = parse_mine_profile(new_profile)
+            print(f"  Остаток энергии: {new_energy}")
+            
+            # Если энергия не уменьшилась или стала 0 — выходим
+            if new_energy <= 0:
+                print("  ⚡ Энергия кончилась, заканчиваем копку")
+                break
+            if new_energy >= last_energy:
+                print("  ⚡ Энергия не тратится, возможно лимит")
+                break
+            
+            last_energy = new_energy
+            energy = new_energy
+        else:
+            print("  ⚠️ Не удалось получить обновление энергии")
+            break
+        
+        await asyncio.sleep(1.0)
+    
+    # 3. Продаём
     sell_command = ore_command.replace("копать", "продать")
     await client.send_message(BOT_USERNAME, sell_command)
     print(f"💰 Продано: {sell_command}")
+    await asyncio.sleep(2)
     
-    # Собираем бонусы
+    # 4. Собираем бонусы
     await client.send_message(BOT_USERNAME, "собрать бонусы")
     print("🎁 Бонусы собраны")
     
-    await send_report(client, f"⛏️ Шахта отработана!\nУровень: {level}\nСкопано: {energy} раз(а)\nРуда: {ore_command.replace('копать ', '')}")
-
-# Функция-заглушка для получения последнего сообщения от BFG
-# В реальном боте ты должен использовать event handler
-async def get_last_message_from_bfg(client):
-    """Возвращает текст последнего сообщения от BFG (нужно реализовать через events)"""
-    # Это временная заглушка. Правильная реализация требует @client.on(events.NewMessage)
-    # Пока возвращаем тестовые данные
-    return """
-Игрок, это ваш профиль шахты:
-🏆 Опыт: 520
-⚡ Энергия: 15
-⛏ Ваш уровень: Золото 🌕
-"""
+    await send_report(client, f"⛏️ Шахта отработана!\nУровень: {level}\nРуда: {ore_command.replace('копать ', '')}")
 
 # ========== ОСНОВНАЯ ЛОГИКА (ТРЕЙД + ШАХТА) ==========
 async def main_loop():
+    global last_mine_response
+    
     print("=" * 60)
-    print("🚀 BFG MINER + TRADER v3.0 ЗАПУЩЕН, СУКА!")
+    print("🚀 BFG MINER + TRADER v4.0 ЗАПУЩЕН, СУКА!")
     print(f"📊 Интервал проверки цены: {CHECK_INTERVAL // 60} минут")
     print(f"📉 Покупка при падении на: {DROP_PERCENT}%")
     print(f"📈 Продажа при росте на: {RISE_PERCENT}%")
@@ -193,6 +219,15 @@ async def main_loop():
     await client.start()
     print("✅ Подключен к Telegram")
     
+    # Обработчик сообщений от BFG
+    @client.on(events.NewMessage(chats=BOT_USERNAME))
+    async def handler(event):
+        global last_mine_response
+        message_text = event.message.text
+        if "профиль шахты" in message_text or "Энергия" in message_text:
+            last_mine_response = message_text
+            print("📥 Получен профиль шахты")
+    
     # Загружаем состояния
     state = load_state()
     mine_state = load_mine_state()
@@ -200,34 +235,59 @@ async def main_loop():
     print(f"📁 Последняя сделка: {state['last_action']} по цене {state['last_price']}")
     
     # Отправляем приветствие
-    await send_report(client, f"🤖 BFG Miner+Trader запущен!\n📊 Трейд: ${MIN_PRICE:,.0f}-${MAX_PRICE:,.0f}, {DROP_PERCENT}%\n⛏️ Шахта: каждые {MINE_INTERVAL_MIN//60}-{MINE_INTERVAL_MAX//60} мин")
+    await send_report(client, f"🤖 BFG Miner+Trader v4.0 запущен!\n📊 Трейд: ${MIN_PRICE:,.0f}-${MAX_PRICE:,.0f}, {DROP_PERCENT}%\n⛏️ Шахта: каждые {MINE_INTERVAL_MIN//60}-{MINE_INTERVAL_MAX//60} мин")
     
     last_mine_time = mine_state.get('last_mine_time', 0)
     
     while True:
         try:
-            # ===== ТОРГОВАЯ ЛОГИКА =====
+            # ===== ТОРГОВАЯ ЛОГИКА (С ПРОВЕРКОЙ НА None) =====
             current_price = get_btc_price()
+            
+            # Проверка: если цена не получена — пропускаем цикл
             if current_price is None:
                 print("❌ Не удалось получить цену BTC, жду следующий цикл...")
                 await asyncio.sleep(60)
-                continue   # Пропускаем весь торговый цикл
+                continue
             
-            # Дополнительная страховка: если цена не число
+            # Дополнительная проверка: цена должна быть числом
             if not isinstance(current_price, (int, float)):
-                print(f"⚠️ Цена не число: {current_price}, жду...")
+                print(f"⚠️ Цена не является числом: {current_price}")
                 await asyncio.sleep(60)
                 continue
             
             if MIN_PRICE <= current_price <= MAX_PRICE:
                 last_price = state.get('last_price', current_price)
-                # Страховка: если last_price вдруг None (например, сломался файл)
+                
+                # Если last_price почему-то None — исправляем
                 if last_price is None:
                     last_price = current_price
                     print("📁 last_price отсутствовал, установлена текущая цена")
                 
                 buy_threshold = last_price * (1 - DROP_PERCENT / 100)
                 sell_threshold = last_price * (1 + RISE_PERCENT / 100)
+                
+                print(f"📊 BTC: ${current_price:,.2f} | Купить < ${buy_threshold:,.2f} | Продать > ${sell_threshold:,.2f}")
+                
+                if current_price <= buy_threshold and state['last_action'] != 'buy':
+                    print("🔻 ПОКУПАЮ...")
+                    if await send_bfg_command(client, "Купить биткоин всё"):
+                        await send_report(client, f"📉 КУПИЛ BTC по ${current_price:,.2f}")
+                        state['last_action'] = 'buy'
+                        state['last_price'] = current_price
+                        save_state(state)
+                        
+                elif current_price >= sell_threshold and state['last_action'] != 'sell':
+                    print("🟢 ПРОДАЮ...")
+                    if await send_bfg_command(client, "Продать биткоин всё"):
+                        await send_report(client, f"📈 ПРОДАЛ BTC по ${current_price:,.2f}")
+                        state['last_action'] = 'sell'
+                        state['last_price'] = current_price
+                        save_state(state)
+                else:
+                    print("⚖️ Бездействие")
+            else:
+                print(f"⏸️ Цена ${current_price:,.2f} вне диапазона торговли")
             
             # ===== ЛОГИКА ШАХТЫ =====
             now = time.time()

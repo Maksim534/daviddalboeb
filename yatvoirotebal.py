@@ -13,7 +13,7 @@ from datetime import datetime
 BOT_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
 
 # Brawl Stars API токен (получить на https://developer.brawlstars.com)
-BS_API_TOKEN = "https://developer.brawlstars.com"
+BS_API_TOKEN = "https://api.brawlify.com/v1/brawlers"
 
 # ID твоего Telegram чата (куда слать логи)
 LOG_CHAT_ID = "8564427714"

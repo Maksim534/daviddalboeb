@@ -1,14 +1,62 @@
 #!/usr/bin/env python3
-# Physics Exam Bot - Магнитные явления
+# Physics Exam Bot - Магнитные явления (С ПРЕДВАРИТЕЛЬНОЙ ТЕОРИЕЙ)
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import random
 
 # ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
-YOUR_CHAT_ID = 8564427714
 # ================================
+
+# ========== ТЕОРИЯ ПЕРЕД ЭКЗАМЕНОМ ==========
+THEORY_TEXT = """
+🧲 **КРАТКАЯ ТЕОРИЯ: МАГНИТНЫЕ ЯВЛЕНИЯ** 🧲
+
+━━━━━━━━━━━━━━━━━━━━━━
+1️⃣ **Что такое магнитное поле?**
+Магнитное поле — это особая форма материи, которая существует вокруг движущихся электрических зарядов и постоянных магнитов. Оно действует ТОЛЬКО на движущиеся заряды.
+
+━━━━━━━━━━━━━━━━━━━━━━
+2️⃣ **Правило буравчика (правой руки)**
+Определяет НАПРАВЛЕНИЕ магнитного поля вокруг проводника с током:
+👉 Если буравчик ввинчивать по направлению тока, то рукоятка покажет направление линий магнитного поля.
+
+━━━━━━━━━━━━━━━━━━━━━━
+3️⃣ **Правило левой руки**
+Определяет НАПРАВЛЕНИЕ силы, действующей на проводник с током (сила Ампера) или на заряженную частицу (сила Лоренца):
+👉 Если левую руку расположить так, чтобы линии поля входили в ладонь, а 4 пальца указывали направление тока (или скорости частицы), то отставленный большой палец покажет направление силы.
+
+━━━━━━━━━━━━━━━━━━━━━━
+4️⃣ **Электромагнитная индукция (Фарадей)**
+При ИЗМЕНЕНИИ магнитного поля, пронизывающего замкнутый контур, в этом контуре возникает электрический ток. Это явление называется электромагнитной индукцией.
+
+━━━━━━━━━━━━━━━━━━━━━━
+5️⃣ **Правило Ленца**
+Индукционный ток всегда направлен так, чтобы своим магнитным полем ПРОТИВОДЕЙСТВОВАТЬ изменению магнитного потока, которое его вызвало.
+
+━━━━━━━━━━━━━━━━━━━━━━
+6️⃣ **Ферромагнетики**
+Вещества, которые сильно намагничиваются во внешнем магнитном поле и сохраняют намагниченность после его снятия:
+✅ Железо (Fe)
+✅ Никель (Ni)
+✅ Кобальт (Co)
+✅ Их сплавы
+
+Именно из них делают постоянные магниты.
+
+━━━━━━━━━━━━━━━━━━━━━━
+7️⃣ **Сила Ампера**
+Сила, с которой магнитное поле действует на проводник с током:
+📐 F = B * I * L * sin α
+Максимальна, когда проводник перпендикулярен линиям поля.
+
+━━━━━━━━━━━━━━━━━━━━━━
+8️⃣ **Магнитное поле Земли**
+Постепенно ослабевает. Раз в несколько сотен тысяч лет происходит ИНВЕРСИЯ — полюса меняются местами. Последняя инверсия была ~780 000 лет назад.
+
+━━━━━━━━━━━━━━━━━━━━━━
+"""
 
 # ========== БАЗА ВОПРОСОВ ==========
 QUESTIONS = [
@@ -124,42 +172,55 @@ QUESTIONS = [
     }
 ]
 
-def is_authorized(update: Update):
-    return update.effective_user.id == YOUR_CHAT_ID
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update):
-        await update.message.reply_text("❌ Доступ запрещён")
-        return
-    
-    # Создаём кнопки для удобства
-    buttons = [[KeyboardButton("🔘 Начать экзамен"), KeyboardButton("📊 Статистика")]]
+    buttons = [[KeyboardButton("🔘 Начать экзамен")]]
     reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     
     await update.message.reply_text(
         "🧲 **Экзамен по физике: Магнитные явления**\n\n"
-        "Я задам тебе 10 вопросов. На каждый вопрос будет 4 варианта ответа.\n"
-        "Отвечай цифрой (1-4) или текстом.\n\n"
-        "Если ошибёшься — покажу правильный ответ и объясню почему.\n\n"
-        "Нажми **🔘 Начать экзамен** или напиши /exam",
+        "Я проверю твои знания по теме.\n"
+        "Перед экзаменом я дам краткую теорию.\n\n"
+        "Нажми **🔘 Начать экзамен**, чтобы продолжить.",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
-async def exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update):
-        return
+async def send_theory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет теорию с инлайн-кнопкой"""
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Изучил, готов к экзамену", callback_data="ready_for_exam")]
+    ])
     
-    # Перемешиваем вопросы и берём 10 (или меньше, если их меньше)
+    msg = await update.message.reply_text(
+        THEORY_TEXT,
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+    
+    # Сохраняем ID сообщения с теорией, чтобы потом удалить
+    context.user_data['theory_msg_id'] = msg.message_id
+
+async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет сообщение с теорией и начинает экзамен"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Удаляем сообщение с теорией
+    try:
+        await query.message.delete()
+    except Exception as e:
+        print(f"Не удалось удалить сообщение: {e}")
+    
+    # Начинаем экзамен
     random.shuffle(QUESTIONS)
     context.user_data['questions'] = QUESTIONS[:10]
     context.user_data['current'] = 0
     context.user_data['score'] = 0
     context.user_data['answered'] = 0
     
-    await ask_question(update, context)
+    await ask_question(query.message, context)
 
-async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_question(message, context: ContextTypes.DEFAULT_TYPE):
     q_index = context.user_data['current']
     questions = context.user_data['questions']
     
@@ -182,12 +243,11 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             msg += "💀 Жесть. Открой учебник и возвращайся."
         
-        await update.message.reply_text(msg, parse_mode='Markdown')
+        await message.reply_text(msg, parse_mode='Markdown')
         return
     
     q = questions[q_index]
     
-    # Формируем сообщение с вопросом
     msg = f"**Вопрос {q_index + 1}/{len(questions)}:**\n\n"
     msg += f"{q['question']}\n\n"
     msg += "1️⃣ " + q['options'][0] + "\n"
@@ -196,29 +256,23 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += "4️⃣ " + q['options'][3] + "\n\n"
     msg += "_Отправь номер ответа (1-4) или текст ответа._"
     
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    await message.reply_text(msg, parse_mode='Markdown')
 
 async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update):
-        return
-    
     # Если экзамен не начат
     if 'questions' not in context.user_data or context.user_data['current'] >= len(context.user_data.get('questions', [])):
-        await update.message.reply_text("❌ Сначала начни экзамен командой /exam")
+        await update.message.reply_text("❌ Сначала изучи теорию и начни экзамен кнопкой.")
         return
     
     user_text = update.message.text.strip()
     q_index = context.user_data['current']
     q = context.user_data['questions'][q_index]
     
-    # Определяем, какой ответ выбрал пользователь
+    # Определяем ответ
     answer_index = None
-    
-    # Проверка по цифре
     if user_text in ['1', '2', '3', '4']:
         answer_index = int(user_text) - 1
     else:
-        # Проверка по тексту (ищем совпадение с вариантом)
         user_lower = user_text.lower()
         for i, opt in enumerate(q['options']):
             if opt.lower() == user_lower or opt.lower() in user_lower:
@@ -229,7 +283,6 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Не понял ответ. Напиши номер (1-4) или текст варианта.")
         return
     
-    # Проверяем правильность
     is_correct = (answer_index == q['correct'])
     context.user_data['answered'] += 1
     
@@ -247,31 +300,13 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     context.user_data['current'] += 1
-    await ask_question(update, context)
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update):
-        return
-    
-    # Статистика по вопросам в этой сессии
-    msg = "📊 **Статистика по магнитным явлениям**\n\n"
-    msg += "🧲 Магнитное поле создаётся движущимися зарядами\n"
-    msg += "🔧 Правило буравчика — для направления поля\n"
-    msg += "✋ Правило левой руки — для силы Ампера/Лоренца\n"
-    msg += "⚡ Электромагнитная индукция — ток при изменении поля\n"
-    msg += "🔄 Правило Ленца — противодействие изменению\n"
-    msg += "🧲 Ферромагнетики — железо, никель, кобальт\n\n"
-    msg += "Напиши /exam чтобы проверить себя!"
-    
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    await ask_question(update.message, context)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
     if text == "🔘 Начать экзамен":
-        await exam(update, context)
-    elif text == "📊 Статистика":
-        await stats(update, context)
+        await send_theory(update, context)
     else:
         await check_answer(update, context)
 
@@ -279,12 +314,13 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("exam", exam))
-    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CallbackQueryHandler(start_exam, pattern="ready_for_exam"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("🚀 Physics Exam Bot запущен!")
     print("📚 Тема: Магнитные явления")
+    print("👥 Бот доступен для всех пользователей")
+    print("🎓 Теория → Экзамен → Результат")
     app.run_polling()
 
 if __name__ == "__main__":

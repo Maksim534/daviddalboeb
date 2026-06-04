@@ -18,7 +18,7 @@ API_HASH = '7d3ea0c0d4725498789bd51a9ee02421'     # Твой API Hash
 
 # Кому и куда отправлять
 BOT_USERNAME = 'bfgproject'            # Юзернейм бота BFG
-YOUR_CHAT_ID = 8564427714           # Твой Telegram ID (узнать у @userinfobot)
+YOUR_CHAT_ID = 6888643375           # Твой Telegram ID (узнать у @userinfobot)
 
 # Настройки торговли
 CHECK_INTERVAL = 60 * 3             # Проверять каждые 3 минуты

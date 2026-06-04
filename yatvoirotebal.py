@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # ========== ТВОИ НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 # ====================================
 
 # Создаём клиента (новый синтаксис)

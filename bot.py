@@ -209,36 +209,25 @@ async def main_loop():
             # ===== ТОРГОВАЯ ЛОГИКА =====
             current_price = get_btc_price()
             if current_price is None:
+                print("❌ Не удалось получить цену BTC, жду следующий цикл...")
+                await asyncio.sleep(60)
+                continue   # Пропускаем весь торговый цикл
+            
+            # Дополнительная страховка: если цена не число
+            if not isinstance(current_price, (int, float)):
+                print(f"⚠️ Цена не число: {current_price}, жду...")
                 await asyncio.sleep(60)
                 continue
             
             if MIN_PRICE <= current_price <= MAX_PRICE:
                 last_price = state.get('last_price', current_price)
+                # Страховка: если last_price вдруг None (например, сломался файл)
+                if last_price is None:
+                    last_price = current_price
+                    print("📁 last_price отсутствовал, установлена текущая цена")
                 
                 buy_threshold = last_price * (1 - DROP_PERCENT / 100)
                 sell_threshold = last_price * (1 + RISE_PERCENT / 100)
-                
-                print(f"📊 BTC: ${current_price:,.2f} | Купить < ${buy_threshold:,.2f} | Продать > ${sell_threshold:,.2f}")
-                
-                if current_price <= buy_threshold and state['last_action'] != 'buy':
-                    print("🔻 ПОКУПАЮ...")
-                    if await send_bfg_command(client, "Купить биткоин всё"):
-                        await send_report(client, f"📉 КУПИЛ BTC по ${current_price:,.2f}")
-                        state['last_action'] = 'buy'
-                        state['last_price'] = current_price
-                        save_state(state)
-                        
-                elif current_price >= sell_threshold and state['last_action'] != 'sell':
-                    print("🟢 ПРОДАЮ...")
-                    if await send_bfg_command(client, "Продать биткоин всё"):
-                        await send_report(client, f"📈 ПРОДАЛ BTC по ${current_price:,.2f}")
-                        state['last_action'] = 'sell'
-                        state['last_price'] = current_price
-                        save_state(state)
-                else:
-                    print("⚖️ Бездействие")
-            else:
-                print(f"⏸️ Цена ${current_price:,.2f} вне диапазона торговли")
             
             # ===== ЛОГИКА ШАХТЫ =====
             now = time.time()

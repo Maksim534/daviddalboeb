@@ -1,280 +1,236 @@
 #!/usr/bin/env python3
-# Playerok Monitor - ФИКС 403 ОШИБКИ
-# Мониторит дешёвые аккаунты Brawl Stars
+# Brawl Stars Account Tracker - Оценка ценности аккаунта
 
-import requests
-import time
-import re
+import aiohttp
+import asyncio
+from telegram import Bot, Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 import json
-import os
-import random
 from datetime import datetime
 
 # ========== НАСТРОЙКИ ==========
+# Твой Telegram бот
 BOT_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
-CHAT_ID = "8564427714"
 
-# ТРИ ВАРИАНТА ССЫЛОК (пробуем по очереди, какая пройдёт)
-URLS_TO_TRY = [
-    "https://playerok.com/category/akkaunty-brawl-stars",
-    "https://playerok.com/brawl-stars/accounts",
-    "https://playerok.com/category/akkaunty-brawl-stars?sorting=newest"
-]
+# Brawl Stars API токен (получить на https://developer.brawlstars.com)
+BS_API_TOKEN = "https://api.brawlify.com/v1/brawlers"
 
-# Настройки фильтрации
-MIN_DISCOUNT = 20
-MAX_PRICE = 5000
-MIN_LEGENDS = 0
-MIN_TROPHIES = 0
+# ID твоего Telegram чата (куда слать логи)
+LOG_CHAT_ID = "8564427714"
+# ================================
 
-# Интервал проверки (секунды)
-CHECK_INTERVAL = 300  # 5 минут, чтобы не бесить сайт
+# Функция для отправки логов
+async def log_message(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": LOG_CHAT_ID, "text": text}
+    async with aiohttp.ClientSession() as session:
+        await session.post(url, json=payload)
 
-# Файл для хранения просмотренных ID
-SEEN_FILE = "seen_ids.json"
-# =================================
+# Очистка тега игрока
+def clean_tag(tag):
+    tag = tag.strip().upper()
+    if tag.startswith('#'):
+        tag = tag[1:]
+    # Экранируем решётку для API
+    return tag.replace('#', '%23')
 
-def send_telegram(text):
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "Markdown"
-        }
-        response = requests.post(url, json=payload, timeout=10)
-        if response.status_code == 200:
-            print("✅ Уведомление отправлено")
-        else:
-            print(f"❌ Ошибка Telegram: {response.text}")
-    except Exception as e:
-        print(f"❌ Ошибка отправки: {e}")
-
-def load_seen_ids():
-    if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, 'r') as f:
-            return set(json.load(f))
-    return set()
-
-def save_seen_ids(seen_ids):
-    if len(seen_ids) > 1000:
-        seen_ids = set(list(seen_ids)[-500:])
-    with open(SEEN_FILE, 'w') as f:
-        json.dump(list(seen_ids), f)
-
-def get_listings(url, attempt=1):
-    """Парсит страницу с разными заголовками при повторах"""
+# Запрос к Brawl Stars API
+async def fetch_bs_api(endpoint, params=None):
+    url = f"https://api.brawlstars.com/v1/{endpoint}"
+    headers = {"Authorization": f"Bearer {BS_API_TOKEN}"}
     
-    # Разные варианты User-Agent
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    ]
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                error = await response.text()
+                return {"error": f"Ошибка {response.status}: {error}"}
+
+# Получение полной информации об игроке
+async def get_player_info(tag):
+    encoded_tag = clean_tag(tag)
+    return await fetch_bs_api(f"players/{encoded_tag}")
+
+# Получение battle log (для анализа последних игр)
+async def get_battle_log(tag):
+    encoded_tag = clean_tag(tag)
+    return await fetch_bs_api(f"players/{encoded_tag}/battlelog", {"limit": 5})
+
+# Оценка качества аккаунта
+def evaluate_account(player_data):
+    if "error" in player_data:
+        return "❌ Аккаунт не найден", "💀"
     
-    headers = {
-        'User-Agent': user_agents[attempt % len(user_agents)],
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-        'Referer': 'https://playerok.com/',
+    trophies = player_data.get("trophies", 0)
+    highest_trophies = player_data.get("highestTrophies", 0)
+    exp_level = player_data.get("expLevel", 0)
+    
+    # Считаем бойцов
+    brawlers = player_data.get("brawlers", [])
+    total_brawlers = len(brawlers)
+    
+    # Всего бойцов в игре ~76 (на сейчас, но можно вытащить динамически)
+    # Но для оценки просто считаем количество
+    legendaries = len([b for b in brawlers if b.get("rarity") == "LEGENDARY"])
+    mythics = len([b for b in brawlers if b.get("rarity") == "MYTHIC"])
+    epics = len([b for b in brawlers if b.get("rarity") == "EPIC"])
+    
+    # Считаем гаджеты и звёздные силы
+    total_gadgets = sum(len(b.get("gadgets", [])) for b in brawlers)
+    total_star_powers = sum(len(b.get("starPowers", [])) for b in brawlers)
+    
+    # Средний уровень силы
+    if total_brawlers > 0:
+        avg_power = sum(b.get("power", 0) for b in brawlers) / total_brawlers
+    else:
+        avg_power = 0
+    
+    # Оценка
+    score = 0
+    verdict = ""
+    emoji = ""
+    
+    # Критерии оценки
+    if trophies >= 30000:
+        score += 30
+    elif trophies >= 20000:
+        score += 20
+    elif trophies >= 10000:
+        score += 10
+        
+    if legendaries >= 5:
+        score += 25
+    elif legendaries >= 3:
+        score += 15
+    elif legendaries >= 1:
+        score += 5
+        
+    if avg_power >= 9:
+        score += 20
+    elif avg_power >= 7:
+        score += 10
+        
+    if total_gadgets + total_star_powers >= 50:
+        score += 15
+    elif total_gadgets + total_star_powers >= 20:
+        score += 5
+    
+    # Вердикт
+    if score >= 70:
+        verdict = "🔥 **ТОПОВЫЙ АККАУНТ!** Бери не думая!"
+        emoji = "💎🔥"
+    elif score >= 50:
+        verdict = "👍 **Хороший вариант** для старта или доната"
+        emoji = "⭐️👍"
+    elif score >= 30:
+        verdict = "🤷 **Среднячок**. Смотри по цене, если дешево — бери"
+        emoji = "🟡🤷"
+    else:
+        verdict = "💩 **Мусор**. Проходи мимо, даже за бесплатно"
+        emoji = "🗑️💩"
+    
+    return {
+        "trophies": trophies,
+        "highest_trophies": highest_trophies,
+        "exp_level": exp_level,
+        "total_brawlers": total_brawlers,
+        "legendaries": legendaries,
+        "mythics": mythics,
+        "epics": epics,
+        "total_gadgets": total_gadgets,
+        "total_star_powers": total_star_powers,
+        "avg_power": round(avg_power, 1),
+        "score": score,
+        "verdict": verdict,
+        "emoji": emoji
     }
-    
-    # Куки (имитация сессии)
-    cookies = {
-        'playerok_lang': 'ru',
-        '_ga': 'GA1.2.123456789.123456789',
-    }
-    
-    try:
-        print(f"📡 Запрос к {url} (попытка {attempt})")
-        response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
-        
-        if response.status_code != 200:
-            print(f"❌ HTTP {response.status_code}")
-            return []
-        
-        html = response.text
-        
-        # Проверяем, не попали ли на капчу
-        if "captcha" in html.lower() or "доступ запрещен" in html.lower():
-            print("❌ Обнаружена капча или блокировка!")
-            return []
-        
-        # Ищем ссылки на товары
-        product_links = re.findall(r'href="(/products/\d+[^"]*)"', html)
-        product_links = list(dict.fromkeys(product_links))
-        
-        print(f"   Найдено ссылок на товары: {len(product_links)}")
-        
-        # Парсим цены и характеристики из карточек
-        listings = []
-        
-        for link in product_links[:40]:  # Берём первые 40
-            product_url = "https://playerok.com" + link
-            product_id = re.search(r'/products/(\d+)', link)
-            product_id = product_id.group(1) if product_id else None
-            
-            if not product_id:
-                continue
-            
-            # Ищем цену вокруг этой ссылки (контекстный поиск)
-            # Находим кусок HTML вокруг ссылки
-            link_pos = html.find(link)
-            context = html[max(0, link_pos-1000):min(len(html), link_pos+2000)]
-            
-            # Ищем цену в контексте
-            price_match = re.search(r'(\d+[\s]?[\d]*)\s*₽', context)
-            price = int(re.sub(r'\s', '', price_match.group(1))) if price_match else 0
-            
-            # Ищем скидку
-            discount_match = re.search(r'-(\d+)%', context)
-            discount = int(discount_match.group(1)) if discount_match else 0
-            
-            # Ищем легендарки
-            legends = 0
-            legends_match = re.search(r'(\d+)\s*(?:легендарных|легендарки|legendary)', context.lower())
-            if legends_match:
-                legends = int(legends_match.group(1))
-            
-            # Ищем трофеи
-            trophies = 0
-            trophies_match = re.search(r'(\d+[\s]?[\d]*)\s*(?:трофеев|трофеи|trophy)', context.lower())
-            if trophies_match:
-                trophies = int(re.sub(r'\s', '', trophies_match.group(1)))
-            
-            if price > 0:
-                listings.append({
-                    'id': product_id,
-                    'price': price,
-                    'discount': discount,
-                    'legends': legends,
-                    'trophies': trophies,
-                    'link': product_url
-                })
-        
-        return listings
-        
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        return []
 
-def is_worth_buying(listing):
-    if MAX_PRICE > 0 and listing['price'] > MAX_PRICE:
-        return False
-    if listing['discount'] >= MIN_DISCOUNT:
-        return True
-    if MIN_LEGENDS > 0 and listing['legends'] >= MIN_LEGENDS:
-        return True
-    if MIN_TROPHIES > 0 and listing['trophies'] >= MIN_TROPHIES:
-        return True
-    if listing['price'] <= 100 and listing['price'] > 0:
-        return True
-    return False
-
-def format_message(listing):
-    reason = []
-    if listing['discount'] >= MIN_DISCOUNT:
-        reason.append(f"🔥 Скидка {listing['discount']}%")
-    if listing['legends'] >= 1:
-        reason.append(f"⭐️ {listing['legends']} легендарок")
-    if listing['trophies'] >= 1:
-        reason.append(f"🏆 {listing['trophies']} трофеев")
-    
-    reason_text = ", ".join(reason) if reason else "💰 Дешёвый аккаунт!"
-    
+# Форматирование сообщения для Telegram
+def format_report(account_info):
     return f"""
-🔔 **{reason_text}**
+{account_info['emoji']} **ОЦЕНКА АККАУНТА BRAWL STARS**
 
-💰 Цена: **{listing['price']} ₽**
-⭐ Легендарки: {listing['legends']}
-🏆 Трофеи: {listing['trophies']}
+🏆 Трофеи: **{account_info['trophies']}** (рекорд: {account_info['highest_trophies']})
+⭐️ Уровень опыта: {account_info['exp_level']}
 
-🔗 [Ссылка на товар]({listing['link']})
+🎲 **БОЙЦЫ:**
+• Легендарные: {account_info['legendaries']} ⭐️
+• Мифические: {account_info['mythics']} 🌙
+• Эпические: {account_info['epics']} ✨
+• Всего: {account_info['total_brawlers']}
 
-⏰ {datetime.now().strftime('%H:%M:%S')}
+🔧 **ПРОКАЧКА:**
+• Средний уровень силы: {account_info['avg_power']}/11
+• Гаджетов: {account_info['total_gadgets']} 💥
+• Звёздных сил: {account_info['total_star_powers']} 🌟
+
+📊 **РЕЙТИНГ:** {account_info['score']}/100
+
+{account_info['verdict']}
 """
 
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 **Brawl Stars Account Tracker**\n\n"
+        "Пришли тег игрока для оценки аккаунта.\n"
+        "Пример: `/check 2PPQVUQ8J`\n"
+        "Или просто отправь тег в чат."
+    )
+
+# Команда /check
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Укажи тег игрока!\nПример: `/check 2PPQVUQ8J`")
+        return
+    
+    player_tag = context.args[0]
+    await update.message.reply_text(f"🔍 Проверяю аккаунт `{player_tag}`... Подожди немного.")
+    
+    await log_message(f"📊 Проверка аккаунта {player_tag} от {update.effective_user.username}")
+    
+    # Получаем данные
+    player_data = await get_player_info(player_tag)
+    
+    if "error" in player_data:
+        await update.message.reply_text(f"❌ Не удалось найти аккаунт `{player_tag}`.\nПроверь правильность тега.")
+        return
+    
+    # Анализируем
+    account_info = evaluate_account(player_data)
+    report = format_report(account_info)
+    
+    await update.message.reply_text(report, parse_mode='Markdown')
+
+# Если пользователь просто пишет тег в чат (без команды)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().upper()
+    
+    # Проверяем, похоже на тег Brawl Stars (буквы + цифры, обычно 8-12 символов)
+    if (len(text) >= 5 and len(text) <= 15 and 
+        any(c.isdigit() for c in text) and 
+        any(c.isalpha() for c in text)):
+        # Подставляем в команду /check
+        await check(update, context)
+    else:
+        await update.message.reply_text(
+            "Отправь тег игрока в формате `2PPQVUQ8J` или `#2PPQVUQ8J`"
+        )
+
 def main():
-    print("=" * 60)
-    print("🚀 PLAYEROK MONITOR v4.0 (ФИКС 403)")
-    print(f"📊 Проверка каждые {CHECK_INTERVAL} сек")
-    print(f"🎯 Фильтры: цена <={MAX_PRICE}₽, скидка >={MIN_DISCOUNT}%")
-    print(f"🔗 Будет проверено {len(URLS_TO_TRY)} ссылок")
-    print("=" * 60)
+    print("=" * 50)
+    print("🔥 Brawl Stars Tracker Bot запущен!")
+    print(f"🤖 Бот: @{BOT_TOKEN[:10]}...")
+    print("=" * 50)
     
-    send_telegram("✅ **Мониторинг Playerok v4 запущен!**\n\nИсправлена ошибка 403, пробуем обойти защиту.")
+    app = Application.builder().token(BOT_TOKEN).build()
     
-    seen_ids = load_seen_ids()
-    print(f"📁 Загружено {len(seen_ids)} просмотренных ID")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("check", check))
+    app.add_handler(MessageHandler(None, handle_message))
     
-    url_attempt = 0
-    request_attempt = 0
-    
-    while True:
-        try:
-            # Случайная задержка перед запросом (от 30 до 90 секунд)
-            delay = random.uniform(30, 90)
-            print(f"💤 Пауза {delay:.1f} сек...")
-            time.sleep(delay)
-            
-            # Берём следующую ссылку из списка (по кругу)
-            current_url = URLS_TO_TRY[url_attempt % len(URLS_TO_TRY)]
-            url_attempt += 1
-            request_attempt += 1
-            
-            listings = get_listings(current_url, request_attempt)
-            print(f"📦 Получено товаров: {len(listings)}")
-            
-            if len(listings) == 0 and request_attempt > 3:
-                print("⚠️ Долгое время нет результатов. Возможно, IP заблокирован.")
-                send_telegram("⚠️ Внимание! Playerok блокирует запросы. Возможно, нужна смена IP или настройка прокси.")
-                request_attempt = 0
-            
-            new_deals = 0
-            for listing in listings:
-                if listing['id'] in seen_ids:
-                    continue
-                
-                if is_worth_buying(listing):
-                    message = format_message(listing)
-                    send_telegram(message)
-                    new_deals += 1
-                    time.sleep(3)
-                
-                seen_ids.add(listing['id'])
-            
-            if new_deals > 0:
-                print(f"🎉 НАЙДЕНО {new_deals} ВЫГОДНЫХ ПРЕДЛОЖЕНИЙ!")
-            else:
-                print(f"⏰ {datetime.now().strftime('%H:%M:%S')} - Новых предложений нет")
-            
-            save_seen_ids(seen_ids)
-            
-            # Если успешно получили товары, сбрасываем счётчик попыток
-            if len(listings) > 0:
-                request_attempt = 0
-                
-        except Exception as e:
-            print(f"💥 Ошибка: {e}")
-            send_telegram(f"⚠️ Ошибка: {str(e)[:100]}")
-        
-        print(f"💤 Жду {CHECK_INTERVAL} секунд...")
-        time.sleep(CHECK_INTERVAL)
+    app.run_polling()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n👋 Остановлено")
-        send_telegram("🛑 Мониторинг остановлен")
-    except Exception as e:
-        print(f"\n💀 Ошибка: {e}")
-        send_telegram(f"💀 Ошибка: {e}")
+    main()

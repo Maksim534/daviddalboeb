@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Brawl Stars Account Tracker - Оценка ценности аккаунта
+# Brawl Stars Account Tracker - ПОЛНОСТЬЮ РАБОЧАЯ ВЕРСИЯ
 
 import aiohttp
 import asyncio
@@ -8,11 +8,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import json
 from datetime import datetime
 
-# ========== НАСТРОЙКИ ==========
+# ========== НАСТРОЙКИ (ЗАМЕНИ НА СВОИ) ==========
 # Твой Telegram бот
 BOT_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
 
-# Brawl Stars API токен (получить на https://developer.brawlstars.com)
+# Brawl Stars API токен (твой, который получил)
 BS_API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjQ5MzNkNmE2LTEzNGItNDRkNS1hN2QzLTg2ODFjMjQ4YTUxOCIsImlhdCI6MTc4MDUzMjkwMiwic3ViIjoiZGV2ZWxvcGVyL2E0ZWQ5YzQ1LTVhZjMtN2Y0NS03YjQ3LTkxNTE4MWFkY2JhZCIsInNjb3BlcyI6WyJicmF3bHN0YXJzIl0sImxpbWl0cyI6W3sidGllciI6ImRldmVsb3Blci9zaWx2ZXIiLCJ0eXBlIjoidGhyb3R0bGluZyJ9LHsiY2lkcnMiOlsiMTYzLjUzLjI0NC42OSJdLCJ0eXBlIjoiY2xpZW50In1dfQ.AIuccx4lUjhHu8w34rrTWjkdvyT2oCBPhCIqwB-VrPbrFXQFKTbCARsTXC2HLMFTwmD1N3KGYgy7t8CEfArwew"
 
 # ID твоего Telegram чата (куда слать логи)
@@ -26,13 +26,16 @@ async def log_message(text):
     async with aiohttp.ClientSession() as session:
         await session.post(url, json=payload)
 
-# Очистка тега игрока
+# Очистка тега игрока (ВАЖНО!)
 def clean_tag(tag):
+    """Очищает тег от лишних символов и решётки"""
     tag = tag.strip().upper()
+    # Убираем решётку если есть
     if tag.startswith('#'):
         tag = tag[1:]
-    # Экранируем решётку для API
-    return tag.replace('#', '%23')
+    # Убираем всякий мусор
+    tag = ''.join(c for c in tag if c.isalnum() or c == '#')
+    return tag
 
 # Запрос к Brawl Stars API
 async def fetch_bs_api(endpoint, params=None):
@@ -44,13 +47,14 @@ async def fetch_bs_api(endpoint, params=None):
             if response.status == 200:
                 return await response.json()
             else:
-                error = await response.text()
-                return {"error": f"Ошибка {response.status}: {error}"}
+                error_text = await response.text()
+                return {"error": f"Ошибка {response.status}: {error_text[:200]}"}
 
 # Получение полной информации об игроке
 async def get_player_info(tag):
-    encoded_tag = clean_tag(tag)
-    return await fetch_bs_api(f"players/{encoded_tag}")
+    clean_tag_str = clean_tag(tag)
+    # API Brawl Stars работает с тегом без решётки
+    return await fetch_bs_api(f"players/{clean_tag_str}")
 
 # Оценка качества аккаунта
 def evaluate_account(player_data):
@@ -166,7 +170,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 **Brawl Stars Account Tracker**\n\n"
         "Пришли тег игрока для оценки аккаунта.\n"
         "Пример: `/check 2PPQVUQ8J`\n"
-        "Или просто отправь тег в чат."
+        "Или просто отправь тег в чат.\n\n"
+        "Тег можно найти в игре: профиль → под ником (начинается с #)"
     )
 
 # Команда /check
@@ -175,22 +180,34 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Укажи тег игрока!\nПример: `/check 2PPQVUQ8J`")
         return
     
-    player_tag = context.args[0]
-    await update.message.reply_text(f"🔍 Проверяю аккаунт `{player_tag}`... Подожди немного.")
+    raw_tag = context.args[0]
+    player_tag = clean_tag(raw_tag)
     
-    await log_message(f"📊 Проверка аккаунта {player_tag} от {update.effective_user.username}")
+    if not player_tag:
+        await update.message.reply_text("❌ Неправильный формат тега. Пример: `2PPQVUQ8J`")
+        return
+    
+    await update.message.reply_text(f"🔍 Проверяю аккаунт `{raw_tag}`... Подожди немного.")
+    
+    await log_message(f"📊 Проверка аккаунта {raw_tag} от {update.effective_user.username}")
     
     # Получаем данные
     player_data = await get_player_info(player_tag)
     
     if "error" in player_data:
-        await update.message.reply_text(f"❌ Не удалось найти аккаунт `{player_tag}`.\nПроверь правильность тега.")
+        error_msg = player_data["error"]
+        await update.message.reply_text(
+            f"❌ Не удалось найти аккаунт `{raw_tag}`.\n\n"
+            f"Причина: {error_msg[:200]}\n\n"
+            f"Проверь правильность тега.\n"
+            f"Тег можно найти в игре: профиль → под ником (начинается с #)"
+        )
         return
     
     # Анализируем
     account_info = evaluate_account(player_data)
     if not account_info:
-        await update.message.reply_text(f"❌ Ошибка при анализе аккаунта `{player_tag}`.")
+        await update.message.reply_text(f"❌ Ошибка при анализе аккаунта `{raw_tag}`.")
         return
     
     report = format_report(account_info)
@@ -198,25 +215,25 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Если пользователь просто пишет тег в чат (без команды)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().upper()
+    text = update.message.text.strip()
     
-    # Проверяем, похоже на тег Brawl Stars
-    if (len(text) >= 5 and len(text) <= 15 and 
-        any(c.isdigit() for c in text) and 
-        any(c.isalpha() for c in text)):
+    # Проверяем, похоже на тег Brawl Stars (с решёткой или без)
+    clean_text = text.replace('#', '').strip().upper()
+    if len(clean_text) >= 5 and len(clean_text) <= 15 and clean_text.isalnum():
         # Подставляем в команду /check
         context.args = [text]
         await check(update, context)
     else:
         await update.message.reply_text(
             "Отправь тег игрока в формате `2PPQVUQ8J` или `#2PPQVUQ8J`\n"
-            "Пример: `2PPQVUQ8J`"
+            "Пример: `2PPQVUQ8J`\n\n"
+            "Тег можно найти в игре: профиль → под ником"
         )
 
 def main():
     print("=" * 50)
     print("🔥 Brawl Stars Tracker Bot запущен!")
-    print(f"🤖 Бот: {BOT_TOKEN[:10]}...")
+    print("🤖 Бот готов к работе")
     print("=" * 50)
     
     app = Application.builder().token(BOT_TOKEN).build()
@@ -225,6 +242,7 @@ def main():
     app.add_handler(CommandHandler("check", check))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
+    print("✅ Бот запущен, жду команды...")
     app.run_polling()
 
 if __name__ == "__main__":

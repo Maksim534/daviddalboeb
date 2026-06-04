@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-# BFG Miner + Trader v5.0 - ДЛЯ ИГРОВОГО КУРСА BFG
-# - Берёт курс из BFG командой "биткоин курс"
-# - Парсит цену из ответа бота
-# - Торгует по заданным процентам
-# - Шахта работает отдельно
+# BFG Miner + Trader v5.1 - ФИНАЛЬНАЯ ВЕРСИЯ
+# - Курс из BFG с корректным умножением на 1000
+# - Шахта с проверкой энергии
+# - Сохранение состояния в JSON
 
 import asyncio
 import time
-import requests
 import json
 import os
 import re
@@ -83,10 +81,7 @@ async def get_bfg_price(client):
     """Запрашивает курс биткоина у BFG и парсит цену"""
     global last_price_response
     
-    # Сбрасываем переменную
     last_price_response = ""
-    
-    # Отправляем команду
     await client.send_message(BOT_USERNAME, "биткоин курс")
     await asyncio.sleep(3)
     
@@ -98,8 +93,9 @@ async def get_bfg_price(client):
     # Парсим цену (пример: "курс 1 BTC составляет - 63.091$ 🌐")
     match = re.search(r'(\d+\.?\d*)\$', response)
     if match:
-        price = float(match.group(1))
-        print(f"📊 Курс BFG: ${price}")
+        # ВАЖНО: умножаем на 1000, потому что BFG показывает цену в тысячах
+        price = float(match.group(1)) * 1000
+        print(f"📊 Курс BFG: ${price:.2f}")
         return price
     else:
         print(f"❌ Не удалось распарсить цену: {response[:100]}")
@@ -198,10 +194,11 @@ async def main_loop():
     global last_mine_response, last_price_response
     
     print("=" * 60)
-    print("🚀 BFG MINER + TRADER v5.0 (ПО КУРСУ BFG)")
+    print("🚀 BFG MINER + TRADER v5.1 (ФИНАЛ)")
     print(f"📊 Интервал: {CHECK_INTERVAL} сек")
     print(f"📉 Покупка при падении на: {DROP_PERCENT}%")
     print(f"📈 Продажа при росте на: {RISE_PERCENT}%")
+    print(f"🎯 Диапазон: ${MIN_PRICE} - ${MAX_PRICE}")
     print("=" * 60)
     
     client = TelegramClient('bfg_session', API_ID, API_HASH)
@@ -225,7 +222,7 @@ async def main_loop():
     
     print(f"📁 Состояние: {state}")
     
-    await send_report(client, f"🤖 BFG Trader v5.0 запущен!\n📉 Падение: {DROP_PERCENT}%\n📈 Рост: {RISE_PERCENT}%")
+    await send_report(client, f"🤖 BFG Trader v5.1 запущен!\n📉 Падение: {DROP_PERCENT}%\n📈 Рост: {RISE_PERCENT}%")
     
     last_mine_time = mine_state.get('last_mine_time', 0)
     
@@ -252,7 +249,8 @@ async def main_loop():
                 buy_threshold = last_price * (1 - DROP_PERCENT / 100)
                 sell_threshold = last_price * (1 + RISE_PERCENT / 100)
                 
-                print(f"📊 Цена BFG: ${current_price:.2f} | Купить < ${buy_threshold:.2f} | Продать > ${sell_threshold:.2f}")
+                print(f"📊 Текущая: ${current_price:.2f} | Купить < ${buy_threshold:.2f} | Продать > ${sell_threshold:.2f}")
+                print(f"📈 Последняя сделка: {state['last_action']} по ${last_price:.2f}")
                 
                 if current_price <= buy_threshold and state['last_action'] != 'buy':
                     print("🔻 ПОКУПАЮ...")

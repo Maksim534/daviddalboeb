@@ -1,103 +1,79 @@
 #!/usr/bin/env python3
-# BTC MONITOR - КИДАЕТ В ТЕЛЕГУ ПРИ РЕЗКИХ ДВИЖЕНИЯХ
+# ChatGPT Telegram Bot - Продвинутая версия (с памятью)
 
-import requests
-import time
-from datetime import datetime
+import openai
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ========== НАСТРОЙКИ (ЗАМЕНИ НА СВОИ) ==========
-BOT_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
-CHAT_ID = "8564427714"
+# ========== НАСТРОЙКИ ==========
+TELEGRAM_TOKEN = "8730800500:AAGET1CNnixecxcDhgHV62grw_zf6SWMyFQ"
+OPENAI_API_KEY = "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"
+# ================================
 
-# Чувствительность (процент изменения для уведомления)
-PROCESSOR = 0.5  # 2.5% - если меняется на столько - кидаем оповещение
+openai.api_key = OPENAI_API_KEY
 
-# Как часто проверяем (в секундах)
-CHECK_INTERVAL = 60  # каждую минуту
-# ===============================================
+# Храним историю диалогов для каждого пользователя
+user_histories = {}
 
-def send_telegram(text):
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "Markdown"
-        }
-        requests.post(url, json=payload, timeout=10)
-        print("✅ Уведомление отправлено")
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
+def get_user_history(user_id):
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+    return user_histories[user_id]
 
-def get_btc():
-    url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-    try:
-        data = requests.get(url, timeout=10).json()
-        return float(data['price'])
-    except Exception as e:
-        print(f"❌ Ошибка получения цены: {e}")
-        return None
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    get_user_history(user_id).clear()
+    await update.message.reply_text(
+        "🤖 **ChatGPT Бот запущен!**\n\n"
+        "Просто напиши мне что угодно — я отвечу.\n"
+        "Команды:\n"
+        "/clear — очистить историю\n"
+        "/help — помощь"
+    )
 
-def format_message(price, old_price, percent):
-    if percent > 0:
-        direction = "🚀📈 ВЗЛЕТЕЛ НАХУЙ!"
-        emoji = "🟢🟢🟢"
-    else:
-        direction = "💀📉 ЕБНУЛСЯ ВНИЗ!"
-        emoji = "🔴🔴🔴"
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in user_histories:
+        user_histories[user_id].clear()
+    await update.message.reply_text("🗑️ История диалога очищена!")
+
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_message = update.message.text
     
-    return f"""{emoji} {direction} {emoji}
-
-💰 Было: ${old_price:,.0f}
-💰 Стало: ${price:,.0f}
-📊 Изменение: {percent:+.2f}%
-
-⏰ {datetime.now().strftime('%H:%M:%S')}
-"""
+    history = get_user_history(user_id)
+    history.append({"role": "user", "content": user_message})
+    
+    # Ограничиваем историю последними 10 сообщениями
+    if len(history) > 10:
+        history = history[-10:]
+        user_histories[user_id] = history
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты дружелюбный и полезный помощник. Отвечай кратко и по делу."},
+                *history
+            ],
+            max_tokens=1000,
+            temperature=0.7
+        )
+        reply = response.choices[0].message.content
+        history.append({"role": "assistant", "content": reply})
+        await update.message.reply_text(reply)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:200]}")
+        history.pop()  # Удаляем сообщение, которое не прошло
 
 def main():
-    print("=" * 50)
-    print("🚀 BTC МОНИТОР ЗАПУЩЕН!")
-    print(f"📊 Чувствительность: {PROCESSOR}%")
-    print(f"⏱️  Проверка каждые {CHECK_INTERVAL} сек")
-    print("=" * 50)
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
     
-    send_telegram("✅ **BTC Монитор запущен!**\nБуду следить за биткоином.")
-    
-    old_price = get_btc()
-    if not old_price:
-        print("❌ Не удалось получить начальную цену")
-        return
-    
-    print(f"💰 Текущая цена: ${old_price:,.0f}")
-    send_telegram(f"📊 **Стартовая цена:** ${old_price:,.0f}")
-    
-    while True:
-        time.sleep(CHECK_INTERVAL)
-        
-        try:
-            new_price = get_btc()
-            if not new_price:
-                continue
-            
-            percent = (new_price - old_price) / old_price * 100
-            
-            print(f"💰 Цена: ${new_price:,.0f} ({percent:+.2f}%)")
-            
-            if abs(percent) >= PROCESSOR:
-                msg = format_message(new_price, old_price, percent)
-                send_telegram(msg)
-                old_price = new_price
-                
-        except Exception as e:
-            print(f"💥 Ошибка: {e}")
+    print("🚀 ChatGPT Бот запущен!")
+    app.run_polling()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n👋 Остановлен")
-        send_telegram("🛑 **BTC Монитор остановлен**")
-    except Exception as e:
-        print(f"💀 Ошибка: {e}")
-        send_telegram(f"💀 Ошибка: {e}")
+    main()

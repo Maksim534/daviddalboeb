@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# BFG Miner + Farmer v8.0 - С НАЖАТИЕМ НА ИНЛАЙН-КНОПКИ
-# - Шахта: копает, продаёт, присылает отчёты
-# - Ферма: нажимает на кнопки "Оплатить налоги" и "Собрать прибыль"
+# BFG Miner + Farmer v8.1 - С ПРАВИЛЬНЫМ НАЖАТИЕМ КНОПОК
 
 import asyncio
 import time
@@ -11,7 +9,6 @@ import re
 import random
 from datetime import datetime
 from telethon import TelegramClient, errors, events
-from telethon.tl.types import MessageEntityMentionName
 from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
 
 # ========== НАСТРОЙКИ (ЗАМЕНИ НА СВОИ) ==========
@@ -114,19 +111,16 @@ async def mine_process():
     ore_command = get_ore_to_mine(level)
     print(f"⛏ Копаем: {ore_command}")
     
-    # Копаем
     for i in range(energy):
         await client.send_message(BOT_USERNAME, ore_command)
         print(f"  Копка {i+1}/{energy}")
         await asyncio.sleep(random.uniform(2.0, 3.0))
     
-    # Продаём
     sell_command = ore_command.replace("копать", "продать")
     await client.send_message(BOT_USERNAME, sell_command)
     print(f"💰 Продажа: {sell_command}")
     await asyncio.sleep(3)
     
-    # Парсим сумму
     sell_response = last_mine_response
     amount_match = re.search(r'продали\s+(\d+)\s+([а-я]+)\s+за\s+([\d\.]+)\$', sell_response, re.IGNORECASE)
     
@@ -163,7 +157,6 @@ async def farm_process():
     
     last_farm_response = ""
     
-    # Отправляем команду
     await client.send_message(BOT_USERNAME, "Моя ферма")
     await asyncio.sleep(3)
     
@@ -174,7 +167,6 @@ async def farm_process():
     
     print(f"📥 Ответ: {farm_text[:200]}")
     
-    # Парсим налоги
     tax_match = re.search(r'Налоги:\s*([\d\.]+)[^\d]*\/\s*([\d\.]+)[^\d]*', farm_text)
     if not tax_match:
         print("❌ Не удалось распарсить налоги")
@@ -204,14 +196,31 @@ async def farm_process():
             button_text = button.text
             print(f"🔘 Найдена кнопка: {button_text}")
             
-            if "Оплатить" in button_text:
-                await button.click()
-                print("💰 Оплачены налоги")
-                await asyncio.sleep(2)
-            elif "Собрать" in button_text:
-                await button.click()
-                print("📦 Прибыль собрана")
-                await asyncio.sleep(2)
+            if "Оплатить" in button_text or "налог" in button_text.lower():
+                print(f"💰 Нажимаю: {button_text}")
+                try:
+                    await client(GetBotCallbackAnswerRequest(
+                        peer=BOT_USERNAME,
+                        msg_id=last_msg.id,
+                        data=button.data
+                    ))
+                    print("✅ Налоги оплачены")
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    print(f"❌ Ошибка: {e}")
+            
+            elif "Собрать" in button_text or "прибыль" in button_text.lower():
+                print(f"📦 Нажимаю: {button_text}")
+                try:
+                    await client(GetBotCallbackAnswerRequest(
+                        peer=BOT_USERNAME,
+                        msg_id=last_msg.id,
+                        data=button.data
+                    ))
+                    print("✅ Прибыль собрана")
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    print(f"❌ Ошибка: {e}")
     
     await send_report("🌾 **Ферма отработала!**\n💰 Налоги оплачены\n📦 Прибыль собрана")
     return True
@@ -221,7 +230,7 @@ async def main_loop():
     global last_mine_response, last_farm_response, client
     
     print("=" * 60)
-    print("🚀 BFG MINER + FARMER v8.0 ЗАПУЩЕН")
+    print("🚀 BFG MINER + FARMER v8.1 ЗАПУЩЕН")
     print(f"⛏️ Шахта: каждые {MINE_INTERVAL_MIN//60}-{MINE_INTERVAL_MAX//60} минут")
     print(f"🌾 Ферма: каждый час (при пустоте — через 10 минут)")
     print("=" * 60)
@@ -230,7 +239,6 @@ async def main_loop():
     await client.start()
     print("✅ Подключен к Telegram")
     
-    # Обработчик сообщений
     @client.on(events.NewMessage(chats=BOT_USERNAME))
     async def handler(event):
         global last_mine_response, last_farm_response
@@ -248,19 +256,17 @@ async def main_loop():
     last_farm_time = farm_state.get('last_farm_time', 0)
     farm_interval = farm_state.get('current_interval', FARM_INTERVAL_NORMAL)
     
-    await send_report("🤖 BFG Miner+Farmer v8.0 запущен!\n⛏️ Шахта: 10-20 мин\n🌾 Ферма: каждый час")
+    await send_report("🤖 BFG Miner+Farmer v8.1 запущен!\n⛏️ Шахта: 10-20 мин\n🌾 Ферма: каждый час")
     
     while True:
         try:
             now = time.time()
             
-            # Шахта
             if now - last_mine_time > random.randint(MINE_INTERVAL_MIN, MINE_INTERVAL_MAX):
                 await mine_process()
                 last_mine_time = now
                 save_mine_state({"last_mine_time": now})
             
-            # Ферма
             if now - last_farm_time > farm_interval:
                 result = await farm_process()
                 last_farm_time = now

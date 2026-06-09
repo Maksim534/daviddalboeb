@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# BFG Miner + Farmer v8.1 - С ПРАВИЛЬНЫМ НАЖАТИЕМ КНОПОК
+# BFG Miner + Farmer + Gardener v9.0 - ПОЛНАЯ ВЕРСИЯ
+# - Шахта: копает, продаёт, присылает отчёты
+# - Ферма: собирает прибыль, оплачивает налоги
+# - Сад: поливает, собирает прибыль, оплачивает налоги
 
 import asyncio
 import time
@@ -15,19 +18,22 @@ from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
 API_ID = 20045757
 API_HASH = '7d3ea0c0d4725498789bd51a9ee02421'
 BOT_USERNAME = 'bfgproject'
-YOUR_CHAT_ID = 6888643375
+YOUR_CHAT_ID = 8564427714
 
 # Настройки шахты
 MINE_INTERVAL_MIN = 10 * 60
 MINE_INTERVAL_MAX = 20 * 60
 
-# Настройки фермы
+# Настройки фермы и сада
 FARM_INTERVAL_NORMAL = 60 * 60      # 1 час
 FARM_INTERVAL_EMPTY = 10 * 60       # 10 минут
+GARDEN_INTERVAL_NORMAL = 60 * 60    # 1 час
+GARDEN_INTERVAL_EMPTY = 10 * 60     # 10 минут
 
 # Файлы для сохранения состояния
 MINE_STATE_FILE = "mine_state.json"
 FARM_STATE_FILE = "farm_state.json"
+GARDEN_STATE_FILE = "garden_state.json"
 
 # ========== СЛОВАРЬ УРОВНЕЙ И РУД ==========
 LEVEL_ORES = {
@@ -49,6 +55,7 @@ LEVEL_ORES = {
 # Глобальные переменные
 last_mine_response = ""
 last_farm_response = ""
+last_garden_response = ""
 client = None
 
 # ========== ФУНКЦИИ ОТПРАВКИ ==========
@@ -58,6 +65,35 @@ async def send_report(message):
         print(f"📨 Отчёт отправлен")
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}")
+
+# ========== НАЖАТИЕ КНОПОК ==========
+async def press_button_by_text(button_text: str):
+    """Находит кнопку с нужным текстом и нажимает её"""
+    try:
+        async for msg in client.iter_messages(BOT_USERNAME, limit=1):
+            last_msg = msg
+            break
+        
+        if not last_msg or not last_msg.reply_markup:
+            print(f"❌ Не найдены кнопки для '{button_text}'")
+            return False
+        
+        for row in last_msg.reply_markup.rows:
+            for button in row.buttons:
+                if button_text.lower() in button.text.lower():
+                    print(f"🔘 Нажимаю кнопку: {button.text}")
+                    await client(GetBotCallbackAnswerRequest(
+                        peer=BOT_USERNAME,
+                        msg_id=last_msg.id,
+                        data=button.data
+                    ))
+                    return True
+        
+        print(f"❌ Кнопка '{button_text}' не найдена")
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка нажатия кнопки {button_text}: {e}")
+        return False
 
 # ========== ФУНКЦИИ ШАХТЫ ==========
 def parse_mine_profile(text):
@@ -135,7 +171,6 @@ async def mine_process():
         report = f"""⛏️ **Шахта отработала!**
 
 📊 **Уровень:** {level}
-⛏️ **Руда:** добыта
 💰 **Продажа выполнена**"""
     
     await send_report(report)
@@ -181,58 +216,90 @@ async def farm_process():
         await send_report("🌾 **Ферма пуста**\nСледующая проверка через 10 минут.")
         return False
     
-    # Получаем последнее сообщение с кнопками
-    async for msg in client.iter_messages(BOT_USERNAME, limit=1):
-        last_msg = msg
-        break
+    if current_tax > 0:
+        print(f"💰 Оплачиваю налоги: {current_tax:,.0f}")
+        await press_button_by_text("Оплатить налоги")
+        await asyncio.sleep(2)
     
-    if not last_msg or not last_msg.reply_markup:
-        print("❌ Не найдены кнопки")
-        return False
-    
-    # Нажимаем кнопки
-    for row in last_msg.reply_markup.rows:
-        for button in row.buttons:
-            button_text = button.text
-            print(f"🔘 Найдена кнопка: {button_text}")
-            
-            if "Оплатить" in button_text or "налог" in button_text.lower():
-                print(f"💰 Нажимаю: {button_text}")
-                try:
-                    await client(GetBotCallbackAnswerRequest(
-                        peer=BOT_USERNAME,
-                        msg_id=last_msg.id,
-                        data=button.data
-                    ))
-                    print("✅ Налоги оплачены")
-                    await asyncio.sleep(2)
-                except Exception as e:
-                    print(f"❌ Ошибка: {e}")
-            
-            elif "Собрать" in button_text or "прибыль" in button_text.lower():
-                print(f"📦 Нажимаю: {button_text}")
-                try:
-                    await client(GetBotCallbackAnswerRequest(
-                        peer=BOT_USERNAME,
-                        msg_id=last_msg.id,
-                        data=button.data
-                    ))
-                    print("✅ Прибыль собрана")
-                    await asyncio.sleep(2)
-                except Exception as e:
-                    print(f"❌ Ошибка: {e}")
+    print("📦 Собираю прибыль...")
+    await press_button_by_text("Собрать прибыль")
+    await asyncio.sleep(2)
     
     await send_report("🌾 **Ферма отработала!**\n💰 Налоги оплачены\n📦 Прибыль собрана")
     return True
 
+# ========== ФУНКЦИИ САДА ==========
+def load_garden_state():
+    if os.path.exists(GARDEN_STATE_FILE):
+        with open(GARDEN_STATE_FILE, 'r') as f:
+            return json.load(f)
+    return {"last_garden_time": 0, "current_interval": 3600}
+
+def save_garden_state(state):
+    with open(GARDEN_STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
+
+async def garden_process():
+    global last_garden_response
+    print("\n🌳 ЗАХОДИМ В САД!")
+    
+    last_garden_response = ""
+    
+    await client.send_message(BOT_USERNAME, "мои сад")
+    await asyncio.sleep(3)
+    
+    garden_text = last_garden_response
+    if not garden_text:
+        print("❌ Не удалось получить ответ от сада")
+        return False
+    
+    print(f"📥 Ответ сада: {garden_text[:300]}")
+    
+    tax_match = re.search(r'Налоги:\s*([\d\.]+)[^\d]*\/\s*([\d\.]+)[^\d]*', garden_text)
+    water_match = re.search(r'Воды:\s*(\d+)\/\s*(\d+)', garden_text)
+    
+    if not tax_match:
+        print("❌ Не удалось распарсить налоги сада")
+        return False
+    
+    current_tax = float(tax_match.group(1).replace('.', ''))
+    max_tax = float(tax_match.group(2).replace('.', ''))
+    water_current = int(water_match.group(1)) if water_match else 0
+    
+    print(f"📊 Налоги: {current_tax:,.0f} / {max_tax:,.0f}")
+    print(f"💧 Вода: {water_current}")
+    
+    if current_tax > 0:
+        print(f"💰 Оплачиваю налоги: {current_tax:,.0f}")
+        await press_button_by_text("Оплатить налоги")
+        await asyncio.sleep(2)
+    
+    if water_current < 100:
+        print(f"💧 Поливаю сад...")
+        await press_button_by_text("Полить сад")
+        await asyncio.sleep(2)
+    
+    print("📦 Собираю прибыль...")
+    await press_button_by_text("Собрать прибыль")
+    await asyncio.sleep(2)
+    
+    if "0 шт./10 шт." in garden_text or "деревьев: 0" in garden_text:
+        print("🌳 Сад пуст (нет деревьев)")
+        await send_report("🌳 **Сад пуст!**\nКупи деревья командой `купить дерево`")
+        return False
+    
+    await send_report("🌳 **Сад обработан!**\n💰 Налоги оплачены\n💧 Сад полит\n📦 Прибыль собрана")
+    return True
+
 # ========== ОСНОВНАЯ ЛОГИКА ==========
 async def main_loop():
-    global last_mine_response, last_farm_response, client
+    global last_mine_response, last_farm_response, last_garden_response, client
     
     print("=" * 60)
-    print("🚀 BFG MINER + FARMER v8.1 ЗАПУЩЕН")
+    print("🚀 BFG MINER + FARMER + GARDENER v9.0 ЗАПУЩЕН")
     print(f"⛏️ Шахта: каждые {MINE_INTERVAL_MIN//60}-{MINE_INTERVAL_MAX//60} минут")
     print(f"🌾 Ферма: каждый час (при пустоте — через 10 минут)")
+    print(f"🌳 Сад: каждый час (при пустоте — через 10 минут)")
     print("=" * 60)
     
     client = TelegramClient('bfg_session', API_ID, API_HASH)
@@ -241,37 +308,56 @@ async def main_loop():
     
     @client.on(events.NewMessage(chats=BOT_USERNAME))
     async def handler(event):
-        global last_mine_response, last_farm_response
+        global last_mine_response, last_farm_response, last_garden_response
         text = event.message.text
+        
         if "шахты" in text or "Энергия" in text or "продали" in text:
             last_mine_response = text
+        
         if "Майнинг ферма" in text or "Налоги" in text:
             last_farm_response = text
             print("📥 Получен ответ от фермы")
+        
+        if "Сад" in text or "Воды" in text or "Деревья" in text:
+            last_garden_response = text
+            print("📥 Получен ответ от сада")
     
     mine_state = load_mine_state()
     farm_state = load_farm_state()
+    garden_state = load_garden_state()
     
     last_mine_time = mine_state.get('last_mine_time', 0)
     last_farm_time = farm_state.get('last_farm_time', 0)
-    farm_interval = farm_state.get('current_interval', FARM_INTERVAL_NORMAL)
+    last_garden_time = garden_state.get('last_garden_time', 0)
     
-    await send_report("🤖 BFG Miner+Farmer v8.1 запущен!\n⛏️ Шахта: 10-20 мин\n🌾 Ферма: каждый час")
+    farm_interval = farm_state.get('current_interval', FARM_INTERVAL_NORMAL)
+    garden_interval = garden_state.get('current_interval', GARDEN_INTERVAL_NORMAL)
+    
+    await send_report("🤖 BFG Miner+Farmer+Gardener v9.0 запущен!\n⛏️ Шахта: 10-20 мин\n🌾 Ферма: каждый час\n🌳 Сад: каждый час")
     
     while True:
         try:
             now = time.time()
             
+            # Шахта
             if now - last_mine_time > random.randint(MINE_INTERVAL_MIN, MINE_INTERVAL_MAX):
                 await mine_process()
                 last_mine_time = now
                 save_mine_state({"last_mine_time": now})
             
+            # Ферма
             if now - last_farm_time > farm_interval:
                 result = await farm_process()
                 last_farm_time = now
                 farm_interval = FARM_INTERVAL_EMPTY if result is False else FARM_INTERVAL_NORMAL
                 save_farm_state({"last_farm_time": now, "current_interval": farm_interval})
+            
+            # Сад
+            if now - last_garden_time > garden_interval:
+                result = await garden_process()
+                last_garden_time = now
+                garden_interval = GARDEN_INTERVAL_EMPTY if result is False else GARDEN_INTERVAL_NORMAL
+                save_garden_state({"last_garden_time": now, "current_interval": garden_interval})
             
         except Exception as e:
             print(f"💥 Ошибка: {e}")

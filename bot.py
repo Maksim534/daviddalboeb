@@ -267,7 +267,7 @@ async def garden_process():
     print("\n🌳 ЗАХОДИМ В САД!")
     
     last_garden_response = ""
-    await client.send_message(BOT_USERNAME, "мои сад")
+    await client.send_message(BOT_USERNAME, "мой сад")
     await asyncio.sleep(3)
     
     garden_text = last_garden_response

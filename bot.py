@@ -18,7 +18,7 @@ from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
 API_ID = 20045757
 API_HASH = '7d3ea0c0d4725498789bd51a9ee02421'
 BOT_USERNAME = 'bfgproject'
-YOUR_CHAT_ID = 6888643375
+YOUR_CHAT_ID = 8564427714
 
 # Настройки шахты (материя)
 TARGET_MATERIA = 2000               # Цель по материи

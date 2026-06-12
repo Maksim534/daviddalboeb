@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# BFG Miner + Farmer + Gardener v9.0 - ПОЛНАЯ ВЕРСИЯ
-# - Шахта: копает, продаёт, присылает отчёты
+# BFG Miner + Farmer + Gardener v10.0 - С КОПКОЙ МАТЕРИИ ДО 2000
+# - Шахта: копает материю до 2000, показывает прогресс
 # - Ферма: собирает прибыль, оплачивает налоги
 # - Сад: поливает, собирает прибыль, оплачивает налоги
 
@@ -18,11 +18,10 @@ from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
 API_ID = 20045757
 API_HASH = '7d3ea0c0d4725498789bd51a9ee02421'
 BOT_USERNAME = 'bfgproject'
-YOUR_CHAT_ID = 8564427714
+YOUR_CHAT_ID = 6888643375
 
-# Настройки шахты
-MINE_INTERVAL_MIN = 10 * 60
-MINE_INTERVAL_MAX = 20 * 60
+# Настройки шахты (материя)
+TARGET_MATERIA = 2000               # Цель по материи
 
 # Настройки фермы и сада
 FARM_INTERVAL_NORMAL = 60 * 60      # 1 час
@@ -56,6 +55,7 @@ LEVEL_ORES = {
 last_mine_response = ""
 last_farm_response = ""
 last_garden_response = ""
+last_inventory_response = ""
 client = None
 
 # ========== ФУНКЦИИ ОТПРАВКИ ==========
@@ -95,7 +95,7 @@ async def press_button_by_text(button_text: str):
         print(f"❌ Ошибка нажатия кнопки {button_text}: {e}")
         return False
 
-# ========== ФУНКЦИИ ШАХТЫ ==========
+# ========== ФУНКЦИИ ШАХТЫ (КОПКА МАТЕРИИ ДО 2000) ==========
 def parse_mine_profile(text):
     energy_match = re.search(r'⚡ Энергия:\s*(\d+)', text)
     level_match = re.search(r'⛏ Ваш уровень:\s*([^\n]+)', text)
@@ -105,14 +105,6 @@ def parse_mine_profile(text):
     level = re.sub(r'[^\w\s]', '', level_raw).strip()
     
     return energy, level
-
-def get_ore_to_mine(level):
-    if level in LEVEL_ORES:
-        return f"копать {LEVEL_ORES[level]}"
-    for key, value in LEVEL_ORES.items():
-        if key in level or level in key:
-            return f"копать {value}"
-    return "копать палладий"
 
 def load_mine_state():
     if os.path.exists(MINE_STATE_FILE):
@@ -124,10 +116,43 @@ def save_mine_state(state):
     with open(MINE_STATE_FILE, 'w') as f:
         json.dump(state, f, indent=2)
 
+async def get_materia_count():
+    """Проверяет количество материи в инвентаре"""
+    global last_inventory_response
+    
+    last_inventory_response = ""
+    await client.send_message(BOT_USERNAME, "инвентарь")
+    await asyncio.sleep(3)
+    
+    inv_text = last_inventory_response
+    if not inv_text:
+        print("❌ Не удалось получить инвентарь")
+        return None
+    
+    materia_match = re.search(r'🌌\s*Материя:\s*([\d\.,]+)\s*шт', inv_text)
+    if materia_match:
+        count_str = materia_match.group(1).replace('.', '').replace(',', '')
+        return int(count_str)
+    return 0
+
 async def mine_process():
-    global last_mine_response
+    """Копает материю до 2000, показывает прогресс"""
+    global last_mine_response, last_inventory_response
     print("\n⛏️ ЗАХОДИМ В ШАХТУ!")
     
+    # Проверяем текущее количество материи
+    current = await get_materia_count()
+    if current is None:
+        print("❌ Не удалось проверить инвентарь")
+        return
+    
+    print(f"📊 Текущий баланс: {current} / {TARGET_MATERIA} материи")
+    
+    if current >= TARGET_MATERIA:
+        await send_report(f"🌌 **Цель достигнута!**\n📊 {current} / {TARGET_MATERIA} материи\n🎉 Фарм завершён!")
+        return
+    
+    # Получаем профиль шахты (для энергии)
     last_mine_response = ""
     await client.send_message(BOT_USERNAME, "Моя шахта")
     await asyncio.sleep(3)
@@ -144,36 +169,37 @@ async def mine_process():
         print("⚡ Нет энергии")
         return
     
-    ore_command = get_ore_to_mine(level)
+    # Копаем материю (родительный падеж!)
+    ore_command = "копать материю"
     print(f"⛏ Копаем: {ore_command}")
     
     for i in range(energy):
         await client.send_message(BOT_USERNAME, ore_command)
         print(f"  Копка {i+1}/{energy}")
         await asyncio.sleep(random.uniform(2.0, 3.0))
+        
+        # Проверяем новый баланс
+        new_count = await get_materia_count()
+        if new_count is None:
+            break
+        
+        percent = (new_count / TARGET_MATERIA) * 100
+        progress_bar = '█' * int(percent//5) + '░' * (20 - int(percent//5))
+        
+        await send_report(f"🌌 **Фарм материи:**\n📊 {new_count} / {TARGET_MATERIA} ({percent:.1f}%)\n{progress_bar}")
+        
+        if new_count >= TARGET_MATERIA:
+            print(f"🎉 Цель достигнута! {new_count}/{TARGET_MATERIA}")
+            await send_report(f"🌌 **ГОТОВО!**\n📊 Накопано {new_count} материи из {TARGET_MATERIA}")
+            return
+        
+        if new_count == current:
+            print("⚡ Энергия кончилась или материя не копается")
+            break
+        
+        current = new_count
     
-    sell_command = ore_command.replace("копать", "продать")
-    await client.send_message(BOT_USERNAME, sell_command)
-    print(f"💰 Продажа: {sell_command}")
-    await asyncio.sleep(3)
-    
-    sell_response = last_mine_response
-    amount_match = re.search(r'продали\s+(\d+)\s+([а-я]+)\s+за\s+([\d\.]+)\$', sell_response, re.IGNORECASE)
-    
-    if amount_match:
-        report = f"""⛏️ **Шахта отработала!**
-
-📊 **Уровень:** {level}
-⛏️ **Руда:** {amount_match.group(2)}
-💰 **Продано:** {amount_match.group(1)} шт.
-💵 **Сумма:** {amount_match.group(3)}$"""
-    else:
-        report = f"""⛏️ **Шахта отработала!**
-
-📊 **Уровень:** {level}
-💰 **Продажа выполнена**"""
-    
-    await send_report(report)
+    print(f"🌌 Фарм завершён. Итог: {current}/{TARGET_MATERIA}")
 
 # ========== ФУНКЦИИ ФЕРМЫ ==========
 def load_farm_state():
@@ -191,7 +217,6 @@ async def farm_process():
     print("\n🌾 ЗАХОДИМ В ФЕРМУ!")
     
     last_farm_response = ""
-    
     await client.send_message(BOT_USERNAME, "Моя ферма")
     await asyncio.sleep(3)
     
@@ -199,8 +224,6 @@ async def farm_process():
     if not farm_text:
         print("❌ Не удалось получить ответ от фермы")
         return False
-    
-    print(f"📥 Ответ: {farm_text[:200]}")
     
     tax_match = re.search(r'Налоги:\s*([\d\.]+)[^\d]*\/\s*([\d\.]+)[^\d]*', farm_text)
     if not tax_match:
@@ -244,16 +267,13 @@ async def garden_process():
     print("\n🌳 ЗАХОДИМ В САД!")
     
     last_garden_response = ""
-    
-    await client.send_message(BOT_USERNAME, "мой сад")
+    await client.send_message(BOT_USERNAME, "мои сад")
     await asyncio.sleep(3)
     
     garden_text = last_garden_response
     if not garden_text:
         print("❌ Не удалось получить ответ от сада")
         return False
-    
-    print(f"📥 Ответ сада: {garden_text[:300]}")
     
     tax_match = re.search(r'Налоги:\s*([\d\.]+)[^\d]*\/\s*([\d\.]+)[^\d]*', garden_text)
     water_match = re.search(r'Воды:\s*(\d+)\/\s*(\d+)', garden_text)
@@ -293,11 +313,11 @@ async def garden_process():
 
 # ========== ОСНОВНАЯ ЛОГИКА ==========
 async def main_loop():
-    global last_mine_response, last_farm_response, last_garden_response, client
+    global last_mine_response, last_farm_response, last_garden_response, last_inventory_response, client
     
     print("=" * 60)
-    print("🚀 BFG MINER + FARMER + GARDENER v9.0 ЗАПУЩЕН")
-    print(f"⛏️ Шахта: каждые {MINE_INTERVAL_MIN//60}-{MINE_INTERVAL_MAX//60} минут")
+    print("🚀 BFG MINER + FARMER + GARDENER v10.0 ЗАПУЩЕН")
+    print(f"🌌 Шахта: копка материи до {TARGET_MATERIA}")
     print(f"🌾 Ферма: каждый час (при пустоте — через 10 минут)")
     print(f"🌳 Сад: каждый час (при пустоте — через 10 минут)")
     print("=" * 60)
@@ -308,10 +328,10 @@ async def main_loop():
     
     @client.on(events.NewMessage(chats=BOT_USERNAME))
     async def handler(event):
-        global last_mine_response, last_farm_response, last_garden_response
+        global last_mine_response, last_farm_response, last_garden_response, last_inventory_response
         text = event.message.text
         
-        if "шахты" in text or "Энергия" in text or "продали" in text:
+        if "шахты" in text or "Энергия" in text:
             last_mine_response = text
         
         if "Майнинг ферма" in text or "Налоги" in text:
@@ -321,7 +341,12 @@ async def main_loop():
         if "Сад" in text or "Воды" in text or "Деревья" in text:
             last_garden_response = text
             print("📥 Получен ответ от сада")
+        
+        if "инвентарь" in text or "Материя" in text:
+            last_inventory_response = text
+            print("📥 Получен инвентарь")
     
+    # Загружаем состояния
     mine_state = load_mine_state()
     farm_state = load_farm_state()
     garden_state = load_garden_state()
@@ -333,14 +358,14 @@ async def main_loop():
     farm_interval = farm_state.get('current_interval', FARM_INTERVAL_NORMAL)
     garden_interval = garden_state.get('current_interval', GARDEN_INTERVAL_NORMAL)
     
-    await send_report("🤖 BFG Miner+Farmer+Gardener v9.0 запущен!\n⛏️ Шахта: 10-20 мин\n🌾 Ферма: каждый час\n🌳 Сад: каждый час")
+    await send_report(f"🤖 BFG Bot v10.0 запущен!\n🌌 Фарм материи до {TARGET_MATERIA}\n🌾 Ферма: каждый час\n🌳 Сад: каждый час")
     
     while True:
         try:
             now = time.time()
             
-            # Шахта
-            if now - last_mine_time > random.randint(MINE_INTERVAL_MIN, MINE_INTERVAL_MAX):
+            # Шахта (материя) — раз в 10-20 минут
+            if now - last_mine_time > random.randint(600, 1200):
                 await mine_process()
                 last_mine_time = now
                 save_mine_state({"last_mine_time": now})
